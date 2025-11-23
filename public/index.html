@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Catch The Clown — Multiplayer</title>
   <style>
-    :root{--bg:#0f172a;--card:#0b1220;--accent:#10b981;--red:#f97316;}
+    :root{--bg:#0f172a;--card:#0b1220;--accent:#10b981;--red:#f97316;--win:#10b981;--lose:#f97316;}
     body{
       margin:0;
       font-family:Inter,system-ui,Arial;
@@ -44,8 +44,6 @@
     .big{font-size:18px}
     .secret{font-weight:700;color:#f8fafc;margin-top:6px}
     .chat-msg { margin-bottom: 4px; }
-
-    /* New Timer/Turn Styles */
     #turnStatus {
         padding: 8px 12px;
         background: rgba(255, 153, 0, 0.1);
@@ -59,13 +57,33 @@
         font-size: 24px;
         margin-left: 8px;
     }
+    /* New Result Box Styles */
+    .vote-summary {
+        margin-top: 15px;
+        border-top: 1px solid rgba(255,255,255,0.05);
+        padding-top: 10px;
+    }
+    .vote-line {
+        margin-bottom: 4px;
+    }
+    .final-message {
+        margin-top: 20px;
+        padding: 15px;
+        border-radius: 8px;
+        font-size: 22px;
+        font-weight: 800;
+        text-align: center;
+    }
+    .win-msg { background: rgba(16, 185, 129, 0.2); color: var(--win); }
+    .lose-msg { background: rgba(249, 115, 22, 0.2); color: var(--lose); }
+
   </style>
 </head>
 <body>
   <div class="app">
     <h1>Catch The Clown — Multiplayer (Prototype)</h1>
 
-    <div id="lobby" class="row" style="display: flex;">
+    <div id="lobbyArea" class="row">
       <div class="panel" style="flex:0.6">
         <div><strong>Create or Join</strong></div>
         <div style="margin-top:8px">
@@ -91,7 +109,6 @@
         <div style="margin-top:12px"><strong>Phase:</strong> <span id="phaseView">lobby</span></div>
       </div>
     </div>
-
     <hr style="border:none;border-top:1px solid rgba(255,255,255,0.03);margin:12px 0" />
 
     <div id="gameArea" style="display: none;"> 
@@ -109,6 +126,7 @@
             It's <strong id="currentPlayerName">Player</strong>'s turn. (<span id="cluesRemainingCount">X</span> clues left)
             <span id="turnTimer">20</span>s
           </div>
+
           <div style="margin-top:8px">
             <label>Type your clue (one short word/phrase)</label>
             <input id="clueInput" placeholder="e.g. dramatic, red, 1995..." disabled />
@@ -134,12 +152,33 @@
           <select id="voteSelect"></select>
           <button id="voteBtn">Vote</button>
 
-          <div style="margin-top:12px" id="revealBox"></div>
+          <div style="margin-top:12px" id="voteStatus"></div>
         </div>
         
       </div>
     </div>
-
+    <div id="resultArea" style="display: none;">
+        <div class="panel">
+            <h2>🎭 Game Result 🎭</h2>
+            <div id="resultSummary" class="row">
+                <div style="flex: 1.5;">
+                    <div class="big">Accused Player: <strong id="chosenPlayerView">—</strong></div>
+                    <div style="margin-top:8px">Impostor Was: <strong id="impostorNameView">—</strong></div>
+                    <div style="margin-top:8px">Secret Element Was: <strong id="secretFinalView">—</strong></div>
+                    
+                    <div id="finalMessage" class="final-message"></div>
+                    
+                </div>
+                <div style="flex: 1;">
+                    <h3>🗳️ Vote Summary</h3>
+                    <div id="voteResultsList"></div>
+                </div>
+            </div>
+            <div style="margin-top:20px; text-align: center;">
+                <button onclick="resetToLobby();">Play Again</button>
+            </div>
+        </div>
+    </div>
     <div style="margin-top:12px" class="center"><small>Prototype — no accounts, in-memory rooms. Use a stable hosting for public play.</small></div>
   </div>
 
@@ -149,18 +188,37 @@
     let currentRoom = null; 
     let myName = null; 
     let isHost = false;
-    let mySocketId = socket.id; // Store initial ID
-    let currentTurnId = null; // New variable to track whose turn it is
+    let mySocketId = null; 
 
     const $ = id => document.getElementById(id);
     
-    // --- UI VIEW TOGGLE FUNCTION ---
-    function setPhaseView(view) {
-        $('lobby').style.display = (view === 'lobby') ? 'flex' : 'none';
+    // --- UI VIEW TOGGLE FUNCTION (Problem 3) ---
+    function setView(view) {
+        $('lobbyArea').style.display = (view === 'lobby') ? 'flex' : 'none';
         $('gameArea').style.display = (view === 'game') ? 'block' : 'none';
+        $('resultArea').style.display = (view === 'result') ? 'block' : 'none';
+        
+        $('phaseView').textContent = view;
     }
-    setPhaseView('lobby'); 
-    // -----------------------------
+    setView('lobby'); 
+    
+    function resetToLobby() { // Problem 1 & 3
+        // Clear game-specific displays
+        $('clueList').innerHTML = '';
+        $('chatLog').innerHTML = '';
+        $('voteStatus').innerHTML = '';
+        $('voteSelect').value = '';
+        $('voteBtn').disabled = false;
+        
+        // Return to lobby (Host persistence is handled by the server on reload, but here we prevent reload)
+        setView('lobby'); 
+    }
+    // ------------------------------------------
+
+    socket.on('connect', ()=>{ 
+        $('statusBox').textContent = 'Connected'; 
+        mySocketId = socket.id;
+    });
 
     $('createBtn').onclick = ()=>{
       myName = $('nameInput').value.trim() || 'Player'+Math.floor(Math.random()*1000);
@@ -193,15 +251,9 @@
         $('roomIdView').textContent = roomId; 
         $('statusBox').textContent = 'Connected as ' + name; 
         $('inviteLink').textContent = location.origin + '/?room=' + roomId;
-        setPhaseView('lobby');
+        setView('lobby'); 
       });
     }
-
-    // Update socket.id on connect/reconnect
-    socket.on('connect', ()=>{ 
-        $('statusBox').textContent = 'Connected'; 
-        mySocketId = socket.id;
-    });
 
     socket.on('lobbyUpdate', ({players, host})=>{
       $('playersList').innerHTML = '<strong>Players</strong>' + players.map(p=>`<div class="player">${p}</div>`).join('');
@@ -217,13 +269,13 @@
       sel.innerHTML = '<option value="">-- choose --</option>' + players.map(p=>`<option value="${p}">${p}</option>`).join('');
     });
 
-    // NEW: Turn Update Handler
+    // Game Phase Management
     socket.on('turnUpdate', ({currentPlayerId, currentPlayerName, timeRemaining, cluesRemaining}) => {
+        // ... (Turn update logic remains the same) ...
         currentTurnId = currentPlayerId;
-
         $('turnStatus').style.display = 'block';
         $('currentPlayerName').textContent = currentPlayerName;
-        $('cluesRemainingCount').textContent = cluesRemaining - 1; // Remaining after current turn
+        $('cluesRemainingCount').textContent = cluesRemaining - 1; 
         $('turnTimer').textContent = timeRemaining;
 
         const isMyTurn = (mySocketId === currentPlayerId);
@@ -235,47 +287,33 @@
         }
     });
 
-    // NEW: Timer Tick Handler
     socket.on('timerTick', ({timeRemaining}) => {
         $('turnTimer').textContent = timeRemaining;
     });
     
     socket.on('phase', ({phase, category})=>{
       $('phaseView').textContent = phase;
-      $('revealBox').innerHTML = ''; 
-      $('voteBtn').disabled = false; // Enable voting when phase starts
 
       if(phase==='clue'){
+        // ... (Clue phase logic remains the same) ...
         $('categoryView').textContent = category || '—';
-        $('clueList').innerHTML = '';
-        $('chatLog').innerHTML = '';
-        
-        // Input enabled/disabled by 'turnUpdate'
         $('chatInput').disabled = true; 
         $('chatSendBtn').disabled = true;
 
       } else if(phase==='voting'){
-        // Disable clue inputs
+        // ... (Voting phase logic remains the same) ...
         $('clueInput').disabled = true; 
         $('submitClueBtn').disabled = true;
         $('turnStatus').style.display = 'none';
 
-        // ENABLE CHAT CONTROLS during discussion
         $('chatInput').disabled = false;
         $('chatSendBtn').disabled = false;
-        
-      } else {
-        // Disable everything during reveal/lobby
-        $('clueInput').disabled = true;
-        $('submitClueBtn').disabled = true;
-        $('chatInput').disabled = true;
-        $('chatSendBtn').disabled = true;
-        $('turnStatus').style.display = 'none';
       }
     });
 
     socket.on('gameStarted', ({role, category, secret})=>{
-      setPhaseView('game');
+      setView('game'); // Switch to game view
+      // ... (Rest of game start logic remains the same) ...
       $('roleView').textContent = role;
       $('categoryView').textContent = category || '—';
       if(secret) $('secretView').textContent = secret; 
@@ -283,10 +321,12 @@
       
       $('clueList').innerHTML = '';
       $('chatLog').innerHTML = '';
-      $('revealBox').innerHTML = '';
+      $('voteStatus').innerHTML = '';
       $('voteSelect').value = '';
+      $('voteBtn').disabled = false; // Ensure voting button is enabled for the voting phase
     });
 
+    // ... (submitClue, cluesUpdate, chatMessage, newChatMessage handlers remain the same) ...
     $('submitClueBtn').onclick = ()=>{
       const clue = $('clueInput').value.trim();
       if(!currentRoom) return alert('not in room');
@@ -295,7 +335,6 @@
       socket.emit('submitClue', {roomId: currentRoom, clue}, (res)=>{ 
         if(res.ok){ 
           $('clueInput').value=''; 
-          // Client will be disabled by the next 'turnUpdate'
         } else {
             alert(res.error);
         }
@@ -307,7 +346,6 @@
       $('clueList').innerHTML = submittedClues.map(c=>`<div class="player"><strong>${c.name}:</strong> ${c.clue}</div>`).join('');
     });
     
-    // --- CHAT LOGIC ---
     function sendChatMessage() {
         const msg = $('chatInput').value.trim();
         if (msg && currentRoom) {
@@ -317,7 +355,6 @@
     }
 
     $('chatSendBtn').onclick = sendChatMessage;
-
     $('chatInput').onkeypress = (e) => {
         if (e.key === 'Enter') {
             e.preventDefault();
@@ -333,7 +370,13 @@
       chatLog.appendChild(msgElem);
       chatLog.scrollTop = chatLog.scrollHeight; 
     });
-    // --- END CHAT LOGIC ---
+    
+    // Voting Fix (Problem 2)
+    socket.on('voteCast', ({totalVotes, totalPlayers}) => {
+        if ($('voteBtn').disabled) {
+            $('voteStatus').innerHTML = `<em>Vote cast. Waiting for ${totalPlayers - totalVotes} more votes...</em>`;
+        }
+    });
 
     $('voteBtn').onclick = ()=>{
       const v = $('voteSelect').value; 
@@ -341,7 +384,7 @@
       
       socket.emit('castVote', {roomId: currentRoom, votedName: v}, (res)=>{ 
         if(res.ok) { 
-          $('revealBox').innerHTML = '<em>Vote cast. Waiting for others...</em>'; 
+          $('voteStatus').innerHTML = '<em>Vote cast. Waiting for others...</em>'; 
           $('voteBtn').disabled = true;
         } else {
             alert(res.error || 'Failed to cast vote.');
@@ -349,21 +392,34 @@
       });
     };
 
-    socket.on('reveal', ({chosen, isImpostor, impostorName, secret})=>{
-      const box = $('revealBox');
-      const resultText = isImpostor ? 
-        '<div style="color:#10b981">🎉 **Players guessed correctly!** 🎉</div>' : 
-        '<div style="color:#f97316">😔 **Players guessed wrong.** 😔</div>';
-        
-      box.innerHTML = `<div class="big">Voted Off: <strong>${chosen}</strong></div>` +
-        `<div style="margin-top:8px">Impostor Was: <strong>${impostorName}</strong></div>` +
-        `<div style="margin-top:8px">Secret Element Was: <strong>${secret}</strong></div>` +
-        `<div style="margin-top:10px;font-weight:700;">${resultText}</div>` +
-        `<div style="margin-top:15px"><button onclick="window.location.reload();">Play Again</button></div>`; // Simple reload to reset state
+    // Final Reveal Handler (Problem 2, 3, 4)
+    socket.on('reveal', ({chosen, isImpostor, impostorName, secret, voteResults})=>{
+      setView('result'); // Switch to the new result view (Problem 3)
 
-        $('voteBtn').disabled = true;
-        $('chatInput').disabled = true;
-        $('chatSendBtn').disabled = true;
+      $('chosenPlayerView').textContent = chosen;
+      $('impostorNameView').textContent = impostorName;
+      $('secretFinalView').textContent = secret;
+      
+      // Vote Summary (Problem 2)
+      let voteHtml = '';
+      voteResults.forEach(v => {
+          voteHtml += `<div class="vote-line"><strong>${v.voter}</strong> voted for <strong>${v.voted}</strong></div>`;
+      });
+      $('voteResultsList').innerHTML = voteHtml;
+      
+      // Final Message (Problem 4)
+      const finalMsgBox = $('finalMessage');
+      finalMsgBox.classList.remove('win-msg', 'lose-msg');
+
+      if (isImpostor) {
+        // Investigator Win
+        finalMsgBox.classList.add('win-msg');
+        finalMsgBox.innerHTML = 'Haa Haa 😂! Clown not clowning. Investigators Win!';
+      } else {
+        // Impostor Win
+        finalMsgBox.classList.add('lose-msg');
+        finalMsgBox.innerHTML = 'Huh, I fooled you clowns! 🤡 Impostor Wins!';
+      }
     });
 
     socket.on('disconnect', ()=>{ $('statusBox').textContent = 'Disconnected'; });
