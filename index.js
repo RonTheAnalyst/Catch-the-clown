@@ -7,6 +7,7 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server);
 
+// Serve static files from the 'public' directory (we assume index.html is there)
 app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3000;
@@ -14,116 +15,36 @@ const PORT = process.env.PORT || 3000;
 // YOUR CUSTOM CATEGORIES + ITEMS
 const CATEGORIES = {
   "Movies": [
-    "Dark Knight",
-    "Inception",
-    "No Smoking",
-    "Welcome",
-    "Dhamaal",
-    "Phir Hera Pheri",
-    "Oppenheimer",
-    "Black Phone",
-    "PK",
-    "Interstellar",
-    "12 Angry Men",
-    "The Godfather"
+    "Dark Knight", "Inception", "No Smoking", "Welcome", "Dhamaal", "Phir Hera Pheri",
+    "Oppenheimer", "Black Phone", "PK", "Interstellar", "12 Angry Men", "The Godfather"
   ],
   "Sports": [
-    "Cricket",
-    "Football",
-    "Hockey",
-    "Kabbadi",
-    "Tennis",
-    "Badminton",
-    "Table Tennis",
-    "Basketball",
-    "Baseball",
-    "Boxing",
-    "Golf",
-    "Wrestling"
+    "Cricket", "Football", "Hockey", "Kabbadi", "Tennis", "Badminton",
+    "Table Tennis", "Basketball", "Baseball", "Boxing", "Golf", "Wrestling"
   ],
   "Professor": [
-    "Sharad",
-    "Jyoti",
-    "Kishore",
-    "Manisha",
-    "Balakrishna",
-    "Ashok",
-    "Khatija",
-    "Leena",
-    "Pranil",
-    "Vijay",
-    "Niyaz",
-    "Nisha"
+    "Sharad", "Jyoti", "Kishore", "Manisha", "Balakrishna", "Ashok",
+    "Khatija", "Leena", "Pranil", "Vijay", "Niyaz", "Nisha"
   ],
   "Country": [
-    "Pakistan",
-    "Nepal",
-    "Sri lanka",
-    "Thailand",
-    "Maldives",
-    "China",
-    "Russia",
-    "USA",
-    "Germany",
-    "Australia",
-    "France",
-    "Brazil"
+    "Pakistan", "Nepal", "Sri lanka", "Thailand", "Maldives", "China",
+    "Russia", "USA", "Germany", "Australia", "France", "Brazil"
   ],
   "Food": [
-    "Dal Chawal",
-    "Dhokla",
-    "Veg Biryani",
-    "Chicken Biryani",
-    "Poha",
-    "Puran Poli",
-    "Chole Bhature",
-    "Vada Pav",
-    "Dosa",
-    "Shwarma",
-    "Momos",
-    "Prawns"
+    "Dal Chawal", "Dhokla", "Veg Biryani", "Chicken Biryani", "Poha", "Puran Poli",
+    "Chole Bhature", "Vada Pav", "Dosa", "Shwarma", "Momos", "Prawns"
   ],
   "Famous Personality": [
-    "Nikola Tesla",
-    "Einstein",
-    "Thomas Young",
-    "Huygen",
-    "Newton",
-    "Pablo Picasso",
-    "Michael Jackson",
-    "Marie Curie",
-    "Gandhi(Bapu)",
-    "Sigmund Freud",
-    "Muhammad Ali",
-    "Stephen Hawking"
+    "Nikola Tesla", "Einstein", "Thomas Young", "Huygen", "Newton", "Pablo Picasso",
+    "Michael Jackson", "Marie Curie", "Gandhi(Bapu)", "Sigmund Freud", "Muhammad Ali", "Stephen Hawking"
   ],
   "Random Object": [
-    "Mirror",
-    "Umbrella",
-    "Pillow",
-    "Clock",
-    "Toothbrush",
-    "Hammer",
-    "Soap",
-    "Map",
-    "Helmet",
-    "Bucket",
-    "Charger",
-    "Laptop"
+    "Mirror", "Umbrella", "Pillow", "Clock", "Toothbrush", "Hammer",
+    "Soap", "Map", "Helmet", "Bucket", "Charger", "Laptop"
   ],
   "Supreme Leader": [
-    "Putin",
-    "Modi Ji",
-    "Mao",
-    "Kim Jong Un",
-    "Elon Musk",
-    "Donald Trump",
-    "Swastik(Hither)",
-    "Stalin",
-    "Supreme Leader Aj",
-    "Napoleon",
-    "Genghis Khan",
-    "Alexander"
+    "Putin", "Modi Ji", "Mao", "Kim Jong Un", "Elon Musk", "Donald Trump",
+    "Swastik(Hither)", "Stalin", "Supreme Leader Aj", "Napoleon", "Genghis Khan", "Alexander"
   ]
 };
 
@@ -149,6 +70,8 @@ io.on('connection', socket => {
       clues: [],
       votes: {}
     };
+    // Ensure the new player joins the room immediately
+    socket.join(roomId);
     cb({ roomId });
   });
 
@@ -158,6 +81,11 @@ io.on('connection', socket => {
     if (!room) return cb({ ok:false, error:'Room not found' });
     if (Object.keys(room.players).length >= 7)
       return cb({ ok:false, error:'Room full' });
+
+    // Handle case where player might already be in another room (optional)
+    for (const rid of Object.keys(rooms)) {
+        if (rooms[rid].players[socket.id]) socket.leave(rid);
+    }
 
     room.players[socket.id] = { name, role: null, clue: null };
     socket.join(roomId);
@@ -197,7 +125,7 @@ io.on('connection', socket => {
     room.clues = [];
     room.votes = {};
 
-    // Send role info
+    // Send role info to each player individually
     playerIds.forEach(id => {
       const payload = { 
         role: room.players[id].role,
@@ -237,10 +165,25 @@ io.on('connection', socket => {
     cb({ ok:true });
   });
 
+  // --- NEW CHAT HANDLER ---
+  socket.on('chatMessage', ({ roomId, message }) => {
+    const room = rooms[roomId];
+    if (!room || room.state !== 'voting') return; // Only allow chat during voting
+
+    const playerName = room.players[socket.id].name;
+
+    // Broadcast the message to all clients in the room
+    io.to(roomId).emit("newChatMessage", { name: playerName, message });
+  });
+  // --- END NEW CHAT HANDLER ---
+
   // Voting
   socket.on('castVote', ({ roomId, votedName }, cb) => {
     const room = rooms[roomId];
     if (!room || room.state !== "voting") return cb({ ok:false });
+
+    // Prevent voting if already voted
+    if (room.votes[socket.id]) return cb({ ok:false, error: 'Already voted' });
 
     room.votes[socket.id] = votedName;
 
@@ -257,19 +200,26 @@ io.on('connection', socket => {
       const maxVotes = Math.max(...Object.values(tally));
       const suspects = Object.keys(tally).filter(n => tally[n] === maxVotes);
 
-      const chosen = suspects[0];
+      // Simple handling for ties: pick the first one
+      const chosen = suspects[0]; 
+      
       const chosenPlayer = Object.entries(room.players)
         .find(([id,p]) => p.name === chosen);
 
       const chosenId = chosenPlayer ? chosenPlayer[0] : null;
       const isImpostor = chosenId && room.players[chosenId].role === "impostor";
 
+      const impostorName = Object.values(room.players).find(p => p.role === "impostor").name;
+      
       room.state = "reveal";
+      
+      // Clear votes for next round (optional)
+      room.votes = {}; 
 
       io.to(roomId).emit("reveal", {
         chosen,
         isImpostor,
-        impostorName: Object.values(room.players).find(p => p.role === "impostor").name,
+        impostorName,
         secret: room.secret
       });
     }
@@ -283,6 +233,12 @@ io.on('connection', socket => {
       if (room.players[socket.id]) {
         delete room.players[socket.id];
 
+        // If the host disconnects, ideally transfer host or end game (simplified here)
+        if (socket.id === room.host) {
+            const remainingPlayers = Object.keys(room.players);
+            room.host = remainingPlayers.length > 0 ? remainingPlayers[0] : null;
+        }
+
         io.to(roomId).emit("lobbyUpdate", {
           players: Object.values(room.players).map(p => p.name),
           host: room.host
@@ -295,4 +251,4 @@ io.on('connection', socket => {
   });
 });
 
-server.listen(PORT, () => console.log(`Server running on ${PORT}`));
+server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
