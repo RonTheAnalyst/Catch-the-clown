@@ -10,9 +10,9 @@ const io = new Server(server);
 app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3000;
-const CLUE_TIME_SECONDS = 30; // UPDATED: Increased clue time for stability
+const CLUE_TIME_SECONDS = 30; // FINAL: 30 seconds for smoother play
 
-// YOUR CUSTOM CATEGORIES + ITEMS (Kept for completeness)
+// YOUR CUSTOM CATEGORIES + ITEMS
 const CATEGORIES = {
     "Movies": [
         "Dark Knight", "Inception", "No Smoking", "Welcome", "Dhamaal", "Phir Hera Pheri",
@@ -112,7 +112,6 @@ function startNextTurn(roomId) {
 
 
 io.on('connection', socket => {
-  // console.log("Connected:", socket.id);
 
   socket.on('createRoom', (cb) => {
     const roomId = shortid.generate();
@@ -132,17 +131,26 @@ io.on('connection', socket => {
     cb({ roomId });
   });
 
-  // FIX: Host Persistence
+  // FIX: Host Persistence & Mid-Game Block
   socket.on('joinRoom', ({ roomId, name }, cb) => {
     const room = rooms[roomId];
     if (!room) return cb({ ok:false, error:'Room not found' });
+      
+    // BLOCK: Do not allow joining if game is active
+    if (room.state !== 'lobby' && room.state !== 'reveal') {
+        return cb({ 
+            ok: false, 
+            error: 'A game is currently in progress. Please wait for the next round!' 
+        });
+    }
+
     if (Object.keys(room.players).length >= 7)
       return cb({ ok:false, error:'Room full' });
       
+    // Host Persistence Logic
     let isRejoiningHost = false;
     if (room.host && room.players[room.host] && room.players[room.host].name === name) {
         isRejoiningHost = true;
-        // Clean up the old (disconnected) host slot to prevent duplication
         delete room.players[room.host]; 
     }
       
