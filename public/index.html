@@ -220,10 +220,10 @@
     
     // NEW: Character Mapping
     const EMOJI_MAP = {
-        "Wombat": "🦬", "Narwhal": "🦄", "Sloth": "🦥", "Capybara": "🐹", "Red Panda": "🐼", 
-        "Axolotl": "🦎", "Quokka": "😀", "Pangolin": "🛡️", "Alpaca": "🦙", "Fennec Fox": "🦊", 
-        "Hedgehog": "🦔", "Koala": "🐨", "Blobfish": "🐡", "Toucan": "🦜", "Platypus": "🦆", 
-        "Puffin": "🐧", "Manatee": "🐳", "Llama": "🦙", "Tarsier": "🙈", "Okapia": "🦓"
+        "Lion": "🦁", "Wolf": "🐺", "Owl": "🦉", "Fox": "🦊", "Bear": "🐻", 
+        "Cat": "🐱", "Dog": "🐶", "Panda": "🐼", "Shark": "🦈", "Eagle": "🦅", 
+        "Snake": "🐍", "Rabbit": "🐰", "Mouse": "🐭", "Turtle": "🐢", "Monkey": "🐒", 
+        "Elephant": "🐘", "Tiger": "🐅", "Dolphin": "🐬", "Horse": "🐴", "Goat": "🐐"
     };
     const getCharacterEmoji = (charName) => EMOJI_MAP[charName] || '❓';
     let ALL_CHARACTERS = Object.keys(EMOJI_MAP);
@@ -246,11 +246,11 @@
         $('voteSelect').value = '';
         $('voteBtn').disabled = false;
         
-        // Reload characters for selection
         loadCharacterSelection(currentRoom); 
         setView('lobby'); 
     }
     
+    // FIX: Character Loading Logic
     function loadCharacterSelection(roomId) {
         socket.emit('checkCharacters', roomId, ({available, taken}) => {
             ALL_CHARACTERS = available;
@@ -266,15 +266,14 @@
         });
     }
 
-    // Initial load for selection
+    // Initial load for selection and dynamic load
     socket.on('connect', ()=>{ 
         $('statusBox').textContent = 'Connected'; 
         mySocketId = socket.id;
-        loadCharacterSelection(null); // Load initial list
+        loadCharacterSelection(null); 
     });
-
-    // Check characters when input changes
     $('joinRoomInput').oninput = (e) => loadCharacterSelection(e.target.value); 
+
 
     $('createBtn').onclick = ()=>{
       myName = $('nameInput').value.trim();
@@ -306,12 +305,11 @@
     function joinAs(roomId, name, selectedChar){
       socket.emit('joinRoom', {roomId, name, selectedCharacter: selectedChar}, (res)=>{
         if(!res.ok) {
-            // Reload selection list if character was taken while trying to join
             loadCharacterSelection(roomId);
             return alert(res.error || 'failed to join'); 
         }
         currentRoom = roomId; 
-        myCharacter = res.character; // Store assigned character
+        myCharacter = res.character; 
         $('roomIdView').textContent = roomId; 
         $('statusBox').textContent = 'Connected as ' + name + ' (' + getCharacterEmoji(myCharacter) + ')';
         $('inviteLink').textContent = location.origin + '/?room=' + roomId;
@@ -339,11 +337,9 @@
         }); 
       };
 
-      // Populate vote select with characters
       const sel = $('voteSelect'); 
       sel.innerHTML = '<option value="">-- choose --</option>' + players.map(p=>`<option value="${p.name}">${getCharacterEmoji(p.character)} ${p.name}</option>`).join('');
       
-      // Update selector for mid-join checks
       const taken = players.map(p => p.character);
       const charSel = $('charSelect');
       charSel.innerHTML = ALL_CHARACTERS.map(char => {
@@ -383,7 +379,6 @@
     });
     
     socket.on('phase', ({phase, category})=>{
-        // ... (rest of phase logic remains the same)
       $('phaseView').textContent = phase;
 
       if(phase==='clue'){
@@ -510,11 +505,11 @@
       if (ranAway) {
         // Impostor ran away (NEW WIN CONDITION)
         finalMsgBox.classList.add('lose-msg');
-        finalMsgBox.innerHTML = `Haa Haa Haa 😂! Clown ${impostorName} couldn't hold and ran away. **IMPOSTOR WINS!**`;
+        finalMsgBox.innerHTML = `Haa Haa Haa 😂! Clown ${impostorName} couldn't hold and shitted in the pants! 👖 **IMPOSTOR WINS!**`;
         $('chosenPlayerView').textContent = 'N/A';
         $('impostorNameView').textContent = impostorName + ' (Disconnected)';
       } else if (isImpostor) {
-        // Investigator Win (caught the impostor)
+        // Investigator Win
         finalMsgBox.classList.add('win-msg');
         finalMsgBox.innerHTML = 'Haa Haa 😂! Clown not clowning. **INVESTIGATORS WIN!**';
       } else {
