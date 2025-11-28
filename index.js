@@ -10,9 +10,9 @@ const io = new Server(server);
 app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3000;
-const CLUE_TIME_SECONDS = 20;
+const CLUE_TIME_SECONDS = 30; // UPDATED: Increased clue time for stability
 
-// YOUR CUSTOM CATEGORIES + ITEMS (omitted for brevity, assume they are still here)
+// YOUR CUSTOM CATEGORIES + ITEMS (Kept for completeness)
 const CATEGORIES = {
     "Movies": [
         "Dark Knight", "Inception", "No Smoking", "Welcome", "Dhamaal", "Phir Hera Pheri",
@@ -62,17 +62,20 @@ function startNextTurn(roomId) {
         clearInterval(room.timerInterval);
     }
     
+    // Get list of players who haven't given a clue
     const remainingPlayers = Object.entries(room.players)
         .filter(([, p]) => p.clue === null)
         .map(([id]) => id);
     
     if (remainingPlayers.length === 0) {
+        // All clues are done, move to voting phase
         room.state = "voting";
         room.currentPlayerId = null;
         io.to(roomId).emit("phase", { phase: "voting" });
         return;
     }
 
+    // Pick the next random player
     room.currentPlayerId = randomChoice(remainingPlayers);
     room.state = "clue";
     room.cluesRemaining = remainingPlayers.length;
@@ -92,6 +95,7 @@ function startNextTurn(roomId) {
         io.to(roomId).emit("timerTick", { timeRemaining: room.timeRemaining });
 
         if (room.timeRemaining <= 0) {
+            // Timer expired, auto-submit empty clue
             if (room.players[room.currentPlayerId].clue === null) {
                 room.players[room.currentPlayerId].clue = "(Timed Out)";
                 
@@ -108,7 +112,7 @@ function startNextTurn(roomId) {
 
 
 io.on('connection', socket => {
-  console.log("Connected:", socket.id);
+  // console.log("Connected:", socket.id);
 
   socket.on('createRoom', (cb) => {
     const roomId = shortid.generate();
@@ -128,14 +132,13 @@ io.on('connection', socket => {
     cb({ roomId });
   });
 
-  // Host Persistence Fix
+  // FIX: Host Persistence
   socket.on('joinRoom', ({ roomId, name }, cb) => {
     const room = rooms[roomId];
     if (!room) return cb({ ok:false, error:'Room not found' });
     if (Object.keys(room.players).length >= 7)
       return cb({ ok:false, error:'Room full' });
       
-    // 1. Check if the joining player's name matches the current host's name
     let isRejoiningHost = false;
     if (room.host && room.players[room.host] && room.players[room.host].name === name) {
         isRejoiningHost = true;
@@ -150,7 +153,7 @@ io.on('connection', socket => {
     room.players[socket.id] = { name, role: null, clue: null };
     socket.join(roomId);
 
-    // 2. Reassign host if necessary
+    // Reassign host if necessary
     if (isRejoiningHost) {
         room.host = socket.id;
     }
@@ -163,7 +166,6 @@ io.on('connection', socket => {
     cb({ ok:true });
   });
 
-  // Start Game (The game state is reset here on the server)
   socket.on('startGame', ({ roomId }, cb) => {
     const room = rooms[roomId];
     if (!room) return cb({ ok:false });
@@ -182,11 +184,12 @@ io.on('connection', socket => {
     const category = randomChoice(Object.keys(CATEGORIES));
     const secret = randomChoice(CATEGORIES[category]);
 
+    // Reset game state
     room.category = category;
     room.secret = secret;
     room.clues = [];
     room.votes = {};
-    room.state = "clue"; // Set initial state correctly
+    room.state = "clue";
     
     playerIds.forEach(id => {
       const payload = { 
@@ -230,7 +233,7 @@ io.on('connection', socket => {
     io.to(roomId).emit("newChatMessage", { name: playerName, message });
   });
 
-  // Voting Handler - Modified to fix the last-voter delay (Problem 2 & 3)
+  // FIX: Voting Handler - Immediate Result Declaration
   socket.on('castVote', ({ roomId, votedName }, cb) => {
     const room = rooms[roomId];
     if (!room || room.state !== "voting") return cb({ ok:false });
@@ -241,7 +244,7 @@ io.on('connection', socket => {
     const totalPlayers = Object.keys(room.players).length;
     const totalVotes = Object.keys(room.votes).length;
 
-    // Notify all players that a vote was cast (Problem 2)
+    // Notify all players that a vote was cast (fixes last-voter delay perception)
     io.to(roomId).emit('voteCast', { totalVotes, totalPlayers });
 
     if (totalVotes === totalPlayers) {
@@ -265,13 +268,13 @@ io.on('connection', socket => {
       
       room.state = "reveal";
       
-      // Map votes to names for client display (Problem 2)
+      // Map votes to names for client display
       const voteResults = Object.entries(room.votes).map(([voterId, votedName]) => ({
           voter: room.players[voterId].name,
           voted: votedName
       }));
 
-      // Immediately send the reveal event (Problem 3)
+      // Immediately send the reveal event
       io.to(roomId).emit("reveal", {
         chosen,
         isImpostor,
@@ -286,31 +289,47 @@ io.on('connection', socket => {
     cb({ ok:true });
   });
 
+  // FIX: Robust Disconnect & Host Transfer
   socket.on('disconnect', () => {
     for (const roomId of Object.keys(rooms)) {
       const room = rooms[roomId];
+
       if (room.players[socket.id]) {
-        delete room.players[socket.id];
+          const wasHost = (socket.id === room.host);
+          
+          // 1. Completely remove the player's presence
+          delete room.players[socket.id]; 
+          socket.leave(roomId);
 
-        if (socket.id === room.currentPlayerId && room.timerInterval) {
-            clearInterval(room.timerInterval);
-            startNextTurn(roomId); 
-        }
+          // 2. Check and handle host transfer
+          if (wasHost) {
+              const remainingPlayerIds = Object.keys(room.players);
+              if (remainingPlayerIds.length > 0) {
+                  // Assign the host role to the next player in the list
+                  room.host = remainingPlayerIds[0];
+              } else {
+                  room.host = null;
+              }
+          }
+          
+          // 3. Check and handle turn transfer
+          if (socket.id === room.currentPlayerId && room.timerInterval) {
+              clearInterval(room.timerInterval);
+              // Only call startNextTurn if the game is still in the 'clue' phase
+              if (room.state === 'clue') startNextTurn(roomId); 
+          }
 
-        if (socket.id === room.host) {
-            const remainingPlayers = Object.keys(room.players);
-            room.host = remainingPlayers.length > 0 ? remainingPlayers[0] : null;
-        }
+          // 4. Update the lobby for remaining players
+          io.to(roomId).emit("lobbyUpdate", {
+              players: Object.values(room.players).map(p => p.name),
+              host: room.host
+          });
 
-        io.to(roomId).emit("lobbyUpdate", {
-          players: Object.values(room.players).map(p => p.name),
-          host: room.host
-        });
-
-        if (Object.keys(room.players).length === 0) {
-            if (room.timerInterval) clearInterval(room.timerInterval);
-            delete rooms[roomId];
-        }
+          // 5. Delete the room if it's empty
+          if (Object.keys(room.players).length === 0) {
+              if (room.timerInterval) clearInterval(room.timerInterval);
+              delete rooms[roomId];
+          }
       }
     }
   });
