@@ -1,5 +1,5 @@
-const express = require = require('express');
-const http = require('http');
+const express = require('express');
+const http = require('http'); // Correct import for the Node.js HTTP module
 const { Server } = require('socket.io');
 const shortid = require('shortid');
 
@@ -10,9 +10,9 @@ const io = new Server(server);
 app.use(express.static('public'));
 
 const PORT = process.env.PORT || 3000;
-const CLUE_TIME_SECONDS = 30;
+const CLUE_TIME_SECONDS = 30; 
 
-// FINAL & MORE RELATABLE CHARACTER LIST
+// FINAL & RELATABLE CHARACTER LIST
 const CHARACTERS = [
     "Lion", "Wolf", "Owl", "Fox", "Bear", "Cat", "Dog", "Panda", 
     "Shark", "Eagle", "Snake", "Rabbit", "Mouse", "Turtle", "Monkey", 
@@ -166,6 +166,7 @@ io.on('connection', socket => {
 
     // Ensure character is valid
     if (!CHARACTERS.includes(selectedCharacter)) {
+        // This is primarily a safeguard, client should prevent this
         return cb({ ok: false, error: 'Invalid character selected.' });
     }
     
@@ -342,7 +343,6 @@ io.on('connection', socket => {
           const wasHost = (socket.id === room.host);
           const wasImpostor = (room.players[socket.id].role === 'impostor');
           
-          const playerCharacter = room.players[socket.id].character;
           const playerName = room.players[socket.id].name;
 
           // 1. Completely remove the player's presence
@@ -364,7 +364,7 @@ io.on('connection', socket => {
               });
               if (room.timerInterval) clearInterval(room.timerInterval);
               
-              // Clean up other players' state
+              // Clean up other players' state (reset roles/clues)
               Object.keys(room.players).forEach(id => {
                   room.players[id].role = null;
                   room.players[id].clue = null;
