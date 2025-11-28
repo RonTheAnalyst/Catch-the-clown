@@ -245,7 +245,10 @@
 
     function joinAs(roomId, name){
       socket.emit('joinRoom', {roomId, name}, (res)=>{
-        if(!res.ok) return alert(res.error || 'failed to join');
+        if(!res.ok) {
+            // Displays the mid-game block message
+            return alert(res.error || 'failed to join'); 
+        }
         currentRoom = roomId; 
         $('roomIdView').textContent = roomId; 
         $('statusBox').textContent = 'Connected as ' + name; 
