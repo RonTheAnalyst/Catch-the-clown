@@ -37,8 +37,33 @@
       color:inherit
     }
     button{cursor:pointer;background:var(--accent);color:#022; border:none}
-    .players{margin-top:8px}
-    .player{padding:6px 8px;background:rgba(255,255,255,0.02);border-radius:6px;margin-bottom:6px}
+    
+    /* NEW: Character Styles */
+    .players { margin-top: 8px; }
+    .player-container { 
+        display: flex; 
+        align-items: center; 
+        padding: 6px 8px;
+        background: rgba(255,255,255,0.02);
+        border-radius: 6px; 
+        margin-bottom: 6px;
+        border: 2px solid transparent; 
+        transition: border 0.3s, background 0.3s;
+    }
+    .player-container.highlight { 
+        border: 2px solid var(--red);
+        background: rgba(249, 115, 22, 0.1); 
+    }
+    .player-avatar { 
+        font-size: 20px; 
+        margin-right: 10px; 
+        line-height: 1;
+    }
+    .player-name { font-weight: 500; }
+    .player-host { color: gold; margin-left: 5px; }
+
+    /* End Character Styles */
+    
     .center{text-align:center}
     .clue-list{max-height:200px;overflow-y:auto;margin-top:8px}
     .big{font-size:18px}
@@ -86,7 +111,8 @@
       <div class="panel" style="flex:0.6">
         <div><strong>Create or Join</strong></div>
         <div style="margin-top:8px">
-          <input id="nameInput" placeholder="Your name" />
+          <input id="nameInput" placeholder="Your name" style="width:120px;" />
+          <select id="charSelect" style="width:160px;"></select>
           <button id="createBtn">Create Room</button>
         </div>
         <div style="margin-top:8px">or join room id: <input id="joinRoomInput" placeholder="room id" style="width:140px" /> <button id="joinBtn">Join</button></div>
@@ -188,9 +214,20 @@
     let myName = null; 
     let isHost = false;
     let mySocketId = null; 
+    let myCharacter = null;
 
     const $ = id => document.getElementById(id);
     
+    // NEW: Character Mapping
+    const EMOJI_MAP = {
+        "Wombat": "🦬", "Narwhal": "🦄", "Sloth": "🦥", "Capybara": "🐹", "Red Panda": "🐼", 
+        "Axolotl": "🦎", "Quokka": "😀", "Pangolin": "🛡️", "Alpaca": "🦙", "Fennec Fox": "🦊", 
+        "Hedgehog": "🦔", "Koala": "🐨", "Blobfish": "🐡", "Toucan": "🦜", "Platypus": "🦆", 
+        "Puffin": "🐧", "Manatee": "🐳", "Llama": "🦙", "Tarsier": "🙈", "Okapia": "🦓"
+    };
+    const getCharacterEmoji = (charName) => EMOJI_MAP[charName] || '❓';
+    let ALL_CHARACTERS = Object.keys(EMOJI_MAP);
+
     // UI VIEW TOGGLE FUNCTION
     function setView(view) {
         $('lobbyArea').style.display = (view === 'lobby') ? 'flex' : 'none';
@@ -201,41 +238,64 @@
     }
     setView('lobby'); 
     
-    // FIX: Safe Lobby Reset (Host Persistence)
+    // FIX: Safe Lobby Reset
     function resetToLobby() { 
-        // Clear game-specific displays
         $('clueList').innerHTML = '';
         $('chatLog').innerHTML = '';
         $('voteStatus').innerHTML = '';
         $('voteSelect').value = '';
         $('voteBtn').disabled = false;
         
+        // Reload characters for selection
+        loadCharacterSelection(currentRoom); 
         setView('lobby'); 
     }
-    // ------------------------------------------
+    
+    function loadCharacterSelection(roomId) {
+        socket.emit('checkCharacters', roomId, ({available, taken}) => {
+            ALL_CHARACTERS = available;
+            const charSel = $('charSelect');
+            charSel.innerHTML = ALL_CHARACTERS.map(char => {
+                const isTaken = taken.includes(char);
+                return `<option value="${char}" ${isTaken ? 'disabled' : ''}>${getCharacterEmoji(char)} ${char} ${isTaken ? '(Taken)' : ''}</option>`;
+            }).join('');
+            
+            // Auto-select first available character
+            const firstAvailable = available.find(char => !taken.includes(char));
+            if (firstAvailable) charSel.value = firstAvailable;
+        });
+    }
 
+    // Initial load for selection
     socket.on('connect', ()=>{ 
         $('statusBox').textContent = 'Connected'; 
         mySocketId = socket.id;
+        loadCharacterSelection(null); // Load initial list
     });
 
+    // Check characters when input changes
+    $('joinRoomInput').oninput = (e) => loadCharacterSelection(e.target.value); 
+
     $('createBtn').onclick = ()=>{
-      myName = $('nameInput').value.trim() || 'Player'+Math.floor(Math.random()*1000);
+      myName = $('nameInput').value.trim();
+      const selectedChar = $('charSelect').value;
       if (myName.length < 2) return alert('Name must be at least 2 characters.');
+      
       socket.emit('createRoom', ({roomId}) => {
         currentRoom = roomId; 
         $('roomIdView').textContent = roomId; 
         $('inviteLink').textContent = location.origin + '/?room=' + roomId;
-        joinAs(roomId, myName);
+        joinAs(roomId, myName, selectedChar);
       });
     };
 
     $('joinBtn').onclick = ()=>{
-      myName = $('nameInput').value.trim() || 'Player'+Math.floor(Math.random()*1000);
+      myName = $('nameInput').value.trim();
+      const selectedChar = $('charSelect').value;
       if (myName.length < 2) return alert('Name must be at least 2 characters.');
       const rid = $('joinRoomInput').value.trim();
       if(!rid) return alert('enter room id');
-      joinAs(rid, myName);
+      joinAs(rid, myName, selectedChar);
     };
 
     const params = new URLSearchParams(location.search);
@@ -243,22 +303,34 @@
       $('joinRoomInput').value = params.get('room');
     }
 
-    function joinAs(roomId, name){
-      socket.emit('joinRoom', {roomId, name}, (res)=>{
+    function joinAs(roomId, name, selectedChar){
+      socket.emit('joinRoom', {roomId, name, selectedCharacter: selectedChar}, (res)=>{
         if(!res.ok) {
-            // Displays the mid-game block message
+            // Reload selection list if character was taken while trying to join
+            loadCharacterSelection(roomId);
             return alert(res.error || 'failed to join'); 
         }
         currentRoom = roomId; 
+        myCharacter = res.character; // Store assigned character
         $('roomIdView').textContent = roomId; 
-        $('statusBox').textContent = 'Connected as ' + name; 
+        $('statusBox').textContent = 'Connected as ' + name + ' (' + getCharacterEmoji(myCharacter) + ')';
         $('inviteLink').textContent = location.origin + '/?room=' + roomId;
         setView('lobby'); 
       });
     }
 
     socket.on('lobbyUpdate', ({players, host})=>{
-      $('playersList').innerHTML = '<strong>Players</strong>' + players.map(p=>`<div class="player">${p}</div>`).join('');
+      // Update player list with avatars
+      $('playersList').innerHTML = '<strong>Players</strong>' + players.map(p=>{
+          const isHostIcon = (p.id === host) ? '👑' : '';
+          return `
+            <div class="player-container" data-id="${p.id}">
+              <span class="player-avatar">${getCharacterEmoji(p.character)}</span>
+              <span class="player-name">${p.name}</span> <span class="player-host">${isHostIcon}</span>
+            </div>
+          `;
+      }).join('');
+      
       isHost = (mySocketId === host);
       $('hostControls').style.display = isHost ? 'block' : 'none';
       $('startGameBtn').onclick = ()=>{ 
@@ -267,8 +339,18 @@
         }); 
       };
 
+      // Populate vote select with characters
       const sel = $('voteSelect'); 
-      sel.innerHTML = '<option value="">-- choose --</option>' + players.map(p=>`<option value="${p}">${p}</option>`).join('');
+      sel.innerHTML = '<option value="">-- choose --</option>' + players.map(p=>`<option value="${p.name}">${getCharacterEmoji(p.character)} ${p.name}</option>`).join('');
+      
+      // Update selector for mid-join checks
+      const taken = players.map(p => p.character);
+      const charSel = $('charSelect');
+      charSel.innerHTML = ALL_CHARACTERS.map(char => {
+            const isTaken = taken.includes(char);
+            return `<option value="${char}" ${isTaken ? 'disabled' : ''}>${getCharacterEmoji(char)} ${char} ${isTaken ? '(Taken)' : ''}</option>`;
+      }).join('');
+
     });
 
     // Game Phase Management
@@ -278,6 +360,14 @@
         $('currentPlayerName').textContent = currentPlayerName;
         $('cluesRemainingCount').textContent = cluesRemaining - 1; 
         $('turnTimer').textContent = timeRemaining;
+
+        // Highlight current player
+        document.querySelectorAll('.player-container').forEach(el => {
+            el.classList.remove('highlight');
+            if (el.dataset.id === currentPlayerId) {
+                el.classList.add('highlight');
+            }
+        });
 
         const isMyTurn = (mySocketId === currentPlayerId);
         $('clueInput').disabled = !isMyTurn;
@@ -293,6 +383,7 @@
     });
     
     socket.on('phase', ({phase, category})=>{
+        // ... (rest of phase logic remains the same)
       $('phaseView').textContent = phase;
 
       if(phase==='clue'){
@@ -340,7 +431,12 @@
 
     socket.on('cluesUpdate', ({clues})=>{
       const submittedClues = clues.filter(c => c.clue !== null); 
-      $('clueList').innerHTML = submittedClues.map(c=>`<div class="player"><strong>${c.name}:</strong> ${c.clue}</div>`).join('');
+      $('clueList').innerHTML = submittedClues.map(c=>`
+          <div class="player-container" style="background:rgba(255,255,255,0.01); border:none; margin-bottom:4px;">
+              <span class="player-avatar">${getCharacterEmoji(c.character)}</span>
+              <strong>${c.name}:</strong> ${c.clue}
+          </div>
+      `).join('');
     });
     
     function sendChatMessage() {
@@ -360,16 +456,16 @@
         }
     };
     
-    socket.on('newChatMessage', ({ name, message }) => {
+    socket.on('newChatMessage', ({ name, message, character }) => {
       const chatLog = $('chatLog');
       const msgElem = document.createElement('div');
       msgElem.className = 'chat-msg';
-      msgElem.innerHTML = `<span style="color:#f97316; font-weight: 500;">${name}:</span> ${message}`;
+      msgElem.innerHTML = `<span class="player-avatar">${getCharacterEmoji(character)}</span> 
+                           <span style="color:#f97316; font-weight: 500;">${name}:</span> ${message}`;
       chatLog.appendChild(msgElem);
       chatLog.scrollTop = chatLog.scrollHeight; 
     });
     
-    // FIX: Vote Status Update
     socket.on('voteCast', ({totalVotes, totalPlayers}) => {
         if ($('voteBtn').disabled) {
             $('voteStatus').innerHTML = `<em>Vote cast. Waiting for ${totalPlayers - totalVotes} more votes...</em>`;
@@ -390,8 +486,8 @@
       });
     };
 
-    // FIX: Final Reveal Handler (Switches to Result View)
-    socket.on('reveal', ({chosen, isImpostor, impostorName, secret, voteResults})=>{
+    // FINAL Reveal Handler
+    socket.on('reveal', ({chosen, isImpostor, impostorName, secret, voteResults, ranAway})=>{
       setView('result'); 
 
       $('chosenPlayerView').textContent = chosen;
@@ -399,22 +495,32 @@
       $('secretFinalView').textContent = secret;
       
       let voteHtml = '';
-      voteResults.forEach(v => {
-          voteHtml += `<div class="vote-line"><strong>${v.voter}</strong> voted for <strong>${v.voted}</strong></div>`;
-      });
+      if (voteResults && voteResults.length > 0) {
+          voteResults.forEach(v => {
+              voteHtml += `<div class="vote-line"><strong>${v.voter}</strong> voted for <strong>${v.voted}</strong></div>`;
+          });
+      } else {
+          voteHtml = '— No votes were cast —';
+      }
       $('voteResultsList').innerHTML = voteHtml;
       
       const finalMsgBox = $('finalMessage');
       finalMsgBox.classList.remove('win-msg', 'lose-msg');
 
-      if (isImpostor) {
-        // Investigator Win
-        finalMsgBox.classList.add('win-msg');
-        finalMsgBox.innerHTML = 'Haa Haa 😂! Clown not clowning. Investigators Win!';
-      } else {
-        // Impostor Win
+      if (ranAway) {
+        // Impostor ran away (NEW WIN CONDITION)
         finalMsgBox.classList.add('lose-msg');
-        finalMsgBox.innerHTML = 'Huh, I fooled you clowns! 🤡 Impostor Wins!';
+        finalMsgBox.innerHTML = `Haa Haa Haa 😂! Clown ${impostorName} couldn't hold and ran away. **IMPOSTOR WINS!**`;
+        $('chosenPlayerView').textContent = 'N/A';
+        $('impostorNameView').textContent = impostorName + ' (Disconnected)';
+      } else if (isImpostor) {
+        // Investigator Win (caught the impostor)
+        finalMsgBox.classList.add('win-msg');
+        finalMsgBox.innerHTML = 'Haa Haa 😂! Clown not clowning. **INVESTIGATORS WIN!**';
+      } else {
+        // Impostor Win (voted for the wrong person)
+        finalMsgBox.classList.add('lose-msg');
+        finalMsgBox.innerHTML = 'Huh, I fooled you clowns! 🤡 **IMPOSTOR WINS!**';
       }
     });
 
