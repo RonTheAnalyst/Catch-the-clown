@@ -1,4 +1,4 @@
-const express = require('express');
+const express = require = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const shortid = require('shortid');
@@ -12,12 +12,11 @@ app.use(express.static('public'));
 const PORT = process.env.PORT || 3000;
 const CLUE_TIME_SECONDS = 30;
 
-// NEW: Character List
+// FINAL & MORE RELATABLE CHARACTER LIST
 const CHARACTERS = [
-    "Wombat", "Narwhal", "Sloth", "Capybara", "Red Panda", "Axolotl", 
-    "Quokka", "Pangolin", "Alpaca", "Fennec Fox", "Hedgehog", "Koala",
-    "Blobfish", "Toucan", "Platypus", "Puffin", "Manatee", "Llama",
-    "Tarsier", "Okapia"
+    "Lion", "Wolf", "Owl", "Fox", "Bear", "Cat", "Dog", "Panda", 
+    "Shark", "Eagle", "Snake", "Rabbit", "Mouse", "Turtle", "Monkey", 
+    "Elephant", "Tiger", "Dolphin", "Horse", "Goat"
 ];
 
 // YOUR CUSTOM CATEGORIES + ITEMS (Kept for brevity, assumed correct)
@@ -70,7 +69,6 @@ function startNextTurn(roomId) {
         clearInterval(room.timerInterval);
     }
     
-    // Check if total players is 0, if so, end the game/room state
     if (Object.keys(room.players).length === 0) {
         delete rooms[roomId];
         return;
@@ -111,7 +109,8 @@ function startNextTurn(roomId) {
                 
                 const clues = Object.entries(room.players).map(([id, p]) => ({
                     name: p.name,
-                    clue: p.clue
+                    clue: p.clue,
+                    character: p.character
                 }));
                 io.to(roomId).emit("cluesUpdate", { clues });
             }
@@ -135,11 +134,18 @@ io.on('connection', socket => {
       votes: {},
       currentPlayerId: null,
       timeRemaining: 0,
-      timerInterval: null,
-      takenCharacters: [] // NEW: Initialize taken characters
+      timerInterval: null
     };
     socket.join(roomId);
     cb({ roomId });
+  });
+
+  // NEW HANDLER: Fetches available characters for the selector instantly
+  socket.on('checkCharacters', (roomId, cb) => {
+      const room = rooms[roomId];
+      const allPlayers = room ? Object.values(room.players) : [];
+      const taken = allPlayers.map(p => p.character);
+      cb({ available: CHARACTERS, taken: taken });
   });
 
   // FIX: Host Persistence & Mid-Game Block & Character Assignment
@@ -158,56 +164,45 @@ io.on('connection', socket => {
     if (Object.keys(room.players).length >= 7)
       return cb({ ok:false, error:'Room full' });
 
-    // Ensure character is valid and not taken
+    // Ensure character is valid
     if (!CHARACTERS.includes(selectedCharacter)) {
         return cb({ ok: false, error: 'Invalid character selected.' });
     }
     
-    // Check if player is rejoining (host or not)
     let isRejoiningHost = false;
-    let oldCharacter = null;
-    
-    // 1. Find player by name to check for host/rejoin scenario
-    const existingPlayerEntry = Object.entries(room.players).find(([, p]) => p.name === name);
+    let existingPlayerEntry = Object.entries(room.players).find(([, p]) => p.name === name);
     
     if (existingPlayerEntry) {
         const [oldId, playerObj] = existingPlayerEntry;
         
-        // If the player is the host reloading/rejoining
-        if (oldId === room.host) {
-            isRejoiningHost = true;
-        }
-        oldCharacter = playerObj.character;
-
-        // If character selection changes during rejoin, ensure the old one is freed
-        if (oldCharacter !== selectedCharacter) {
-             return cb({ ok: false, error: 'Cannot change character after initial assignment.' });
+        if (oldId === room.host) { isRejoiningHost = true; }
+        
+        // Block player if they try to join with a different character name
+        if (playerObj.character !== selectedCharacter) {
+             return cb({ ok: false, error: `You must rejoin with your original character: ${playerObj.character}` });
         }
 
         // Clean up old slot
         delete room.players[oldId];
     } else {
-        // New player joining, check if character is taken by someone else
+        // New player joining, check if character is taken by anyone else
         const currentTakenCharacters = Object.values(room.players).map(p => p.character);
         if (currentTakenCharacters.includes(selectedCharacter)) {
             return cb({ ok: false, error: 'Character is already taken.' });
         }
     }
 
-    // 2. Assign player slot
     room.players[socket.id] = { name, role: null, clue: null, character: selectedCharacter }; // Store character
     socket.join(roomId);
 
-    // 3. Reassign host if necessary
     if (isRejoiningHost) {
         room.host = socket.id;
     }
 
-    // 4. Update the character list sent to client
     const playersPayload = Object.values(room.players).map(p => ({
         name: p.name,
         character: p.character,
-        id: Object.keys(room.players).find(id => room.players[id].name === p.name) // Send ID for host check on client
+        id: Object.keys(room.players).find(id => room.players[id].name === p.name)
     }));
 
     io.to(roomId).emit("lobbyUpdate", {
@@ -215,16 +210,7 @@ io.on('connection', socket => {
       host: room.host
     });
 
-    cb({ ok:true, character: selectedCharacter }); // Return selected character
-  });
-
-  // NEW: Handle character selection on new join (before hitting 'join room')
-  socket.on('checkCharacters', (roomId, cb) => {
-      const room = rooms[roomId];
-      if (!room) return cb({ available: CHARACTERS });
-
-      const taken = Object.values(room.players).map(p => p.character);
-      cb({ available: CHARACTERS, taken: taken });
+    cb({ ok:true, character: selectedCharacter });
   });
 
   socket.on('startGame', ({ roomId }, cb) => {
@@ -245,7 +231,6 @@ io.on('connection', socket => {
     const category = randomChoice(Object.keys(CATEGORIES));
     const secret = randomChoice(CATEGORIES[category]);
 
-    // Reset game state
     room.category = category;
     room.secret = secret;
     room.clues = [];
@@ -266,8 +251,7 @@ io.on('connection', socket => {
     startNextTurn(roomId); 
     cb({ ok:true });
   });
-  
-  // (submitClue, chatMessage, castVote handlers remain the same)
+
   socket.on('submitClue', ({ roomId, clue }, cb) => {
     const room = rooms[roomId];
     if (!room || room.state !== "clue" || socket.id !== room.currentPlayerId) {
@@ -279,7 +263,7 @@ io.on('connection', socket => {
     const clues = Object.entries(room.players).map(([id, p]) => ({
         name: p.name,
         clue: p.clue,
-        character: p.character // Send character with clue
+        character: p.character
     }));
     io.to(roomId).emit("cluesUpdate", { clues });
     
@@ -287,14 +271,14 @@ io.on('connection', socket => {
 
     cb({ ok:true });
   });
-  
+
   socket.on('chatMessage', ({ roomId, message }) => {
     const room = rooms[roomId];
     if (!room || room.state !== 'voting') return;
 
     const playerName = room.players[socket.id].name;
-    const playerCharacter = room.players[socket.id].character; // Get character
-    io.to(roomId).emit("newChatMessage", { name: playerName, message, character: playerCharacter }); // Send character
+    const playerCharacter = room.players[socket.id].character;
+    io.to(roomId).emit("newChatMessage", { name: playerName, message, character: playerCharacter });
   });
 
   socket.on('castVote', ({ roomId, votedName }, cb) => {
@@ -358,6 +342,9 @@ io.on('connection', socket => {
           const wasHost = (socket.id === room.host);
           const wasImpostor = (room.players[socket.id].role === 'impostor');
           
+          const playerCharacter = room.players[socket.id].character;
+          const playerName = room.players[socket.id].name;
+
           // 1. Completely remove the player's presence
           delete room.players[socket.id]; 
           socket.leave(roomId);
@@ -365,23 +352,23 @@ io.on('connection', socket => {
           // 2. IMMEDIATE IMPOSTOR RUN WIN CHECK (If game is active)
           if (wasImpostor && (room.state === 'clue' || room.state === 'voting')) {
               room.state = 'reveal';
+              
               // Impostor wins by running away (Investigator loss)
               io.to(roomId).emit("reveal", {
-                  chosen: room.players[socket.id].name, // The one who left
-                  isImpostor: false, // Investigators failed to catch them
-                  impostorName: room.players[socket.id].name,
+                  chosen: playerName, 
+                  isImpostor: false, 
+                  impostorName: playerName,
                   secret: room.secret,
-                  voteResults: [], // No vote data
-                  ranAway: true // NEW FLAG
+                  voteResults: [], 
+                  ranAway: true 
               });
               if (room.timerInterval) clearInterval(room.timerInterval);
+              
               // Clean up other players' state
               Object.keys(room.players).forEach(id => {
                   room.players[id].role = null;
                   room.players[id].clue = null;
               });
-              
-              // Proceed with standard cleanup after broadcast
           }
 
           // 3. Host Transfer
